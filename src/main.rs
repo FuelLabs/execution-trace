@@ -121,6 +121,13 @@ async fn main() {
         .expect("Failed to get reads");
     let reads = storage_reads[0].clone(); // TODO: index
     dbg!(&reads);
+    let mut reads_by_column = HashMap::new();
+    for read in reads {
+        reads_by_column
+            .entry(read.column.clone())
+            .or_insert_with(Vec::new)
+            .push(read);
+    }
 
     let mut vm = Interpreter::<_, _, Script>::with_storage(
         MemoryInstance::new(),
@@ -130,7 +137,8 @@ async fn main() {
             consensus_parameters_version: block.header.consensus_parameters_version,
             state_transition_version: block.header.state_transition_bytecode_version,
             coinbase,
-            reads: RefCell::new(reads),
+            reads_by_column: RefCell::new(reads_by_column),
+            kludge: Default::default(),
             client,
         },
         InterpreterParams::new(gas_price, &consensus_params),

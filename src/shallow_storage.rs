@@ -1,4 +1,4 @@
-use std::{cell::RefCell, convert::Infallible, io};
+use std::{cell::RefCell, collections::HashMap, convert::Infallible, io};
 
 use fuel_core_client::client::FuelClient;
 use fuel_core_types::{services::executor::StorageReadReplayEvent, tai64::Tai64};
@@ -6,7 +6,7 @@ use fuel_vm::{
     error::{InterpreterError, RuntimeError},
     fuel_storage::{StorageRead, StorageSize, StorageWrite},
     fuel_types::BlockHeight,
-    prelude::{Bytes32, StorageAsRef, StorageInspect, StorageMutate},
+    prelude::*,
     storage::{
         BlobData, ContractsAssets, ContractsAssetsStorage, ContractsRawCode, ContractsState,
         ContractsStateData, ContractsStateKey, InterpreterStorage, UploadedBytecodes,
@@ -36,34 +36,33 @@ fn increment_array<const S: usize>(mut array: [u8; S]) -> [u8; S] {
     }
 }
 
+/// Kludgy cache for some reads that work weirdly
+#[derive(Default)]
+pub struct Kludge {
+    peek_only: bool,
+    last_balance: Option<(ContractId, AssetId, Word)>,
+}
+
 pub struct ShallowStorage {
     pub block_height: BlockHeight,
     pub timestamp: Tai64,
     pub consensus_parameters_version: u32,
     pub state_transition_version: u32,
     pub coinbase: fuel_vm::prelude::ContractId,
-    pub reads: RefCell<Vec<StorageReadReplayEvent>>,
+    pub reads_by_column: RefCell<HashMap<String, Vec<StorageReadReplayEvent>>>,
+    pub kludge: RefCell<Kludge>,
     /// Client used to read data from the node as needed
     pub client: FuelClient,
 }
 
 impl ShallowStorage {
     fn pop_read_of_column(&self, column: &str) -> StorageReadReplayEvent {
-        println!(">>> IN {column:?}");
-        if column == "ContractsAssets" {
-            return StorageReadReplayEvent {
-                column: "ContractsAssets".to_string(),
-                key: vec![],
-                value: Some(vec![0, 0, 0, 0, 0, 0, 0, 0]),
-            };
-        }
-        loop {
-            let item = self.reads.borrow_mut().remove(0);
-            if item.column == column {
-                println!("<<< OUT");
-                return item;
-            }
-            println!("Skipping read ({:?} != {:?})", column, item.column);
+        let mut rbc = self.reads_by_column.borrow_mut();
+        let items = rbc.get_mut(column).expect("No values for this column");
+        if self.kludge.borrow().peek_only {
+            items.get(0).expect("No values for this column").clone()
+        } else {
+            items.remove(0)
         }
     }
 }
@@ -177,14 +176,22 @@ storage_rw!(BlobData, |data| todo!("BlobData from bytes {data:?}"));
 impl ContractsAssetsStorage for ShallowStorage {
     fn contract_asset_id_balance(
         &self,
-        id: &fuel_vm::prelude::ContractId,
+        contract: &fuel_vm::prelude::ContractId,
         asset_id: &fuel_vm::prelude::AssetId,
     ) -> Result<Option<fuel_vm::prelude::Word>, Self::Error> {
-        println!("### 1 {id:?} {asset_id:?}");
+        if let Some((prev_contract, prev_asset, prev_value)) = self.kludge.borrow().last_balance {
+            if prev_contract == *contract || prev_asset == *asset_id {
+                println!("### 1 SKIPPED! {contract:?} {asset_id:?} {prev_value}");
+                return Ok(Some(prev_value));
+            }
+        }
+        println!("### 1 {contract:?} {asset_id:?}");
         let balance = self
             .storage::<fuel_vm::storage::ContractsAssets>()
-            .get(&(id, asset_id).into())?
+            .get(&(contract, asset_id).into())?
             .map(std::borrow::Cow::into_owned);
+
+        self.kludge.borrow_mut().last_balance = Some((*contract, *asset_id, balance.unwrap_or(0)));
 
         println!("### /1");
         Ok(balance)
@@ -196,12 +203,14 @@ impl ContractsAssetsStorage for ShallowStorage {
         asset_id: &fuel_vm::prelude::AssetId,
         value: fuel_vm::prelude::Word,
     ) -> Result<(), Self::Error> {
+        self.kludge.borrow_mut().last_balance = Some((*contract, *asset_id, value));
         println!("### 2 {contract:?} {asset_id:?} {value}");
-        fuel_vm::prelude::StorageMutate::<fuel_vm::storage::ContractsAssets>::insert(
-            self,
-            &(contract, asset_id).into(),
-            &value,
-        )
+        // fuel_vm::prelude::StorageMutate::<fuel_vm::storage::ContractsAssets>::insert(
+        //     self,
+        //     &(contract, asset_id).into(),
+        //     &value,
+        // )
+        Ok(())
     }
 
     fn contract_asset_id_balance_replace(
@@ -210,6 +219,12 @@ impl ContractsAssetsStorage for ShallowStorage {
         asset_id: &fuel_vm::prelude::AssetId,
         value: fuel_vm::prelude::Word,
     ) -> Result<Option<fuel_vm::prelude::Word>, Self::Error> {
+        if let Some((prev_contract, prev_asset, prev_value)) = self.kludge.borrow().last_balance {
+            if prev_contract == *contract || prev_asset == *asset_id {
+                println!("### 3 SKIPPED! {contract:?} {asset_id:?} {prev_value}");
+                return Ok(Some(prev_value));
+            }
+        }
         println!("### 3 {contract:?} {asset_id:?} {value}");
         fuel_vm::prelude::StorageMutate::<fuel_vm::storage::ContractsAssets>::replace(
             self,
@@ -316,6 +331,7 @@ impl InterpreterStorage for ShallowStorage {
         range: usize,
     ) -> Result<Vec<Option<std::borrow::Cow<fuel_vm::storage::ContractsStateData>>>, Self::DataError>
     {
+        self.kludge.borrow_mut().peek_only = true;
         println!("contract_state_range {id:?} {start_key:?} {range:?}");
         let mut results = Vec::new();
         let mut key = **start_key;
@@ -327,6 +343,7 @@ impl InterpreterStorage for ShallowStorage {
             results.push(value);
             key = increment_array(key);
         }
+        self.kludge.borrow_mut().peek_only = false;
         Ok(results)
     }
 
