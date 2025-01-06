@@ -1,0 +1,17 @@
+[package]
+name = "local-trace-client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fuel-core-client = { path = "../fuel-core/crates/client" }
+fuel-core-types =  { path = "../fuel-core/crates/types" }
+fuel-vm = { version = "0.59.1", features = ["test-helpers"] }
+fuels = { git = "https://github.com/FuelLabs/fuels-rs", branch = "dento/streaming-decoder" }
+# fuels = "0.66"
+fuel-abi-types = "0.8"
+
+tokio = { version = "1", features = ["full"] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

@@ -1,0 +1,9 @@
+[package]
+name = "deployer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fuels = "0.66"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
