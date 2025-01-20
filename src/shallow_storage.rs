@@ -1,5 +1,4 @@
 use anyhow::anyhow;
-use fuel_core_client::client::FuelClient;
 use fuel_core_types::{services::executor::StorageReadReplayEvent, tai64::Tai64};
 use fuel_vm::{
     error::{InterpreterError, RuntimeError},
@@ -13,15 +12,9 @@ use fuel_vm::{
     },
 };
 use primitive_types::U256;
-use std::{cell::RefCell, collections::HashMap, convert::Infallible, io};
+use std::{cell::RefCell, collections::HashMap, io};
 
-/// Kludgy cache for some reads that work weirdly
-#[derive(Default)]
-pub struct Kludge {
-    peek_only: bool,
-    last_balance: Option<(ContractId, AssetId, Word)>,
-}
-
+#[derive(Clone)]
 pub struct ShallowStorage {
     pub block_height: BlockHeight,
     pub timestamp: Tai64,
@@ -29,11 +22,7 @@ pub struct ShallowStorage {
     pub state_transition_version: u32,
     pub coinbase: fuel_vm::prelude::ContractId,
     pub storage_write_mask: RefCell<HashMap<&'static str, HashMap<Vec<u8>, Vec<u8>>>>,
-    pub reads_by_column: RefCell<HashMap<String, Vec<StorageReadReplayEvent>>>,
     pub storage_reads: RefCell<Vec<StorageReadReplayEvent>>,
-    pub kludge: RefCell<Kludge>,
-    /// Client used to read data from the node as needed
-    pub client: FuelClient,
 }
 
 impl ShallowStorage {
@@ -137,7 +126,7 @@ macro_rules! storage_rw {
 
 
         impl StorageWrite<$table> for ShallowStorage {
-            fn write_bytes(&mut self, key: &<$table as fuel_vm::fuel_storage::Mappable>::Key, buf: &[u8]) -> Result<usize, Self::Error> {
+            fn write_bytes(&mut self, key: &<$table as fuel_vm::fuel_storage::Mappable>::Key, _buf: &[u8]) -> Result<usize, Self::Error> {
                 todo!("write_bytes {key:?}")
             }
 
@@ -279,16 +268,16 @@ impl InterpreterStorage for ShallowStorage {
 
     fn set_consensus_parameters(
         &mut self,
-        version: u32,
-        consensus_parameters: &fuel_vm::prelude::ConsensusParameters,
+        _version: u32,
+        _consensus_parameters: &fuel_vm::prelude::ConsensusParameters,
     ) -> Result<Option<fuel_vm::prelude::ConsensusParameters>, Self::DataError> {
         unreachable!("Cannot be called by a script");
     }
 
     fn set_state_transition_bytecode(
         &mut self,
-        version: u32,
-        hash: &fuel_vm::prelude::Bytes32,
+        _version: u32,
+        _hash: &fuel_vm::prelude::Bytes32,
     ) -> Result<Option<fuel_vm::prelude::Bytes32>, Self::DataError> {
         unreachable!("Cannot be called by a script");
     }
