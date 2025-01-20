@@ -1,8 +1,33 @@
 use fuels::prelude::*;
 use std::str::FromStr;
 
+use clap::{Parser, Subcommand};
+
+/// Execution tracing demo
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+pub struct Args {
+    pub counter_contract: ContractId,
+    #[command(subcommand)]
+    pub cmd: Command,
+}
+
+
+#[derive(Subcommand, Debug)]
+pub enum Command {
+    Count,
+    Increment,
+    Chain {
+        contract_id: ContractId,
+        count: u64,
+    },
+}
+
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
+
     let provider = Provider::connect("localhost:4000").await.unwrap();
 
     let address =
@@ -21,29 +46,39 @@ async fn main() -> anyhow::Result<()> {
             abi = "../test-chain-contract/out/release/test-chain-contract-abi.json"
         ),
     );
+    
+    let counter = TestContract::new(args.counter_contract, impersonator.clone());
+    match args.cmd {
+        Command::Count => {
+            let response = counter.methods().count().call().await?;
+            println!(
+                "Counter value is {:?} after tx {:?}",
+                response.value,
+                response.tx_id.unwrap()
+            );
+        }
+        Command::Increment => {
+            let response = counter.methods().increment().call().await?;
+            println!(
+                "Counter value is {:?} after tx {:?}",
+                response.value,
+                response.tx_id.unwrap()
+            );
+        }
+        Command::Chain { contract_id, count } => {
+            let chain = MyContract::new(contract_id, impersonator.clone());
+        
+            let response = chain.methods().invoke(count).with_contracts(&[&counter]).call().await?;
+            println!(
+                "Response {:?} after tx {:?}",
+                response.value,
+                response.tx_id.unwrap()
+            );
 
-    let contract_id =
-        ContractId::from_str("fc51eadbb8962d9ac7a22e887f82abcf797457bb99fac8a2f634cf1fa08284c8")
-            .unwrap();
-    let contract_instance = TestContract::new(contract_id, impersonator.clone());
+        }
+    }
 
-    // let response = contract_instance.methods().increment().call().await?;
-    // println!(
-    //     "Counter value is {:?} after tx {:?}",
-    //     response.value,
-    //     response.tx_id.unwrap()
-    // );
 
-    let contract_id2 =
-        ContractId::from_str("4995a7693e4c7af5bced3f7e3e4f2d7859139f54fa8d393092c89a3a8fb77177")
-            .unwrap();
-    let contract_instance2 = MyContract::new(contract_id2, impersonator.clone());
 
-    let response = contract_instance2.methods().invoke(5).with_contracts(&[&contract_instance]).call().await?;
-    println!(
-        "Response {:?} after tx {:?}",
-        response.value,
-        response.tx_id.unwrap()
-    );
     Ok(())
 }

@@ -1,10 +1,17 @@
 #![allow(unused_imports, unused_variables, dead_code)]
 
+pub mod args;
 pub mod memory_reader;
 mod shallow_storage;
 
-use std::{cell::RefCell, collections::HashMap, str::FromStr};
+use std::{
+    cell::{Ref, RefCell},
+    collections::HashMap,
+    str::FromStr,
+};
 
+use args::Args;
+use clap::Parser;
 use field::{InputContract, MintGasPrice, OutputContract};
 use fuel_abi_types::abi::{
     full_program::FullProgramABI, program::ProgramABI, unified_program::UnifiedProgramABI,
@@ -42,6 +49,10 @@ where
 
 #[tokio::main]
 async fn main() {
+    pretty_env_logger::init();
+
+    let args = Args::parse();
+
     let mut abi_by_contract_id = HashMap::new();
     for path in ["test-contract", "test-chain-contract"] {
         let deploys = std::fs::read_dir(format!("{path}/out/deployments"))
@@ -71,15 +82,16 @@ async fn main() {
     let client = FuelClient::new("http://localhost:4000").expect("Failed to create client");
 
     let script_tx = client
-        .transaction(
-            &TxId::from_str("4b712d5e7208c55f440821d05d85d57f3bdc28a36c5c03cd27697881deaec6a0")
-                .unwrap(),
-        )
+        .transaction(&(*args.tx_id).into())
         .await
         .expect("Failed to get transaction")
         .expect("no such tx");
-    dbg!(&script_tx.status);
-    let TransactionStatus::Success { block_height, .. } = script_tx.status else {
+    let TransactionStatus::Success {
+        block_height,
+        receipts,
+        ..
+    } = script_tx.status
+    else {
         panic!("Transaction failed");
     };
     let TransactionType::Known(Transaction::Script(script_tx)) = script_tx.transaction else {
@@ -113,16 +125,34 @@ async fn main() {
     let script_tx = script_tx
         .into_checked_basic(block_height, &consensus_params)
         .expect("Failed to check tx")
-        .test_into_ready();
+        .into_ready(
+            gas_price,
+            consensus_params.gas_costs(),
+            consensus_params.fee_params(),
+            Some(block_height),
+        )
+        .expect("Failed to ready tx");
 
     let storage_reads = client
         .storage_read_replay(&block_height)
         .await
         .expect("Failed to get reads");
-    let reads = storage_reads[0].clone(); // TODO: index
-    dbg!(&reads);
+
+    // dbg!(&storage_reads);
+
+    // Here we abuse the fact that the executor starts each transaction with a read of
+    // the ProcessedTransactions column with the transaction ID as the key.
+    // This allows us to find the reads for the transaction we're interested in.
     let mut reads_by_column = HashMap::new();
-    for read in reads {
+    let mut found_our_tx_start = false;
+    for read in storage_reads.iter().cloned() {
+        if read.column == "ProcessedTransactions" && read.key == *args.tx_id {
+            found_our_tx_start = true;
+            continue;
+        }
+        if !found_our_tx_start {
+            continue;
+        }
         reads_by_column
             .entry(read.column.clone())
             .or_insert_with(Vec::new)
@@ -137,7 +167,9 @@ async fn main() {
             consensus_parameters_version: block.header.consensus_parameters_version,
             state_transition_version: block.header.state_transition_bytecode_version,
             coinbase,
+            storage_write_mask: Default::default(),
             reads_by_column: RefCell::new(reads_by_column),
+            storage_reads: RefCell::new(storage_reads),
             kludge: Default::default(),
             client,
         },
@@ -145,58 +177,106 @@ async fn main() {
     );
     vm.set_single_stepping(true);
 
+    let decoder = ABIDecoder::new(DecoderConfig::default());
     let mut receipt_count = 0;
+    let mut return_type_callstack = Vec::new();
+
+    let mut process_new_receipts = |vm: &Interpreter<_, _, Script>| {
+        while receipt_count < vm.receipts().len() {
+            match &vm.receipts()[receipt_count] {
+                Receipt::Call {
+                    to, param1, param2, ..
+                } => {
+                    let Ok(Token::String(method_name)) =
+                        decoder.decode(&ParamType::String, MemoryReader::new(vm.memory(), *param1))
+                    else {
+                        panic!("Expected string");
+                    };
+
+                    if let Some(abi) = abi_by_contract_id.get(to) {
+                        let args_reader = MemoryReader::new(vm.memory(), *param2);
+                        let unified_abi = UnifiedProgramABI::from_counterpart(abi).unwrap();
+
+                        let type_lookup = unified_abi
+                            .types
+                            .into_iter()
+                            .map(|decl| (decl.type_id, decl))
+                            .collect::<HashMap<_, _>>();
+
+                        let func = unified_abi
+                            .functions
+                            .iter()
+                            .find(|f| f.name == method_name)
+                            .unwrap();
+
+                        let return_type =
+                            ParamType::try_from_type_application(&func.output, &type_lookup)
+                                .unwrap();
+
+                        let mut args = Vec::new();
+                        for param in &func.inputs {
+                            let param_type =
+                                ParamType::try_from_type_application(&param, &type_lookup).unwrap();
+                            args.push(
+                                decoder
+                                    .decode(&param_type, args_reader.clone())
+                                    .unwrap()
+                                    .to_string(),
+                            );
+                        }
+
+                        println!(
+                            "{}call to {to} with method {method_name}({})",
+                            "  ".repeat(return_type_callstack.len()),
+                            args.join(", ")
+                        );
+                        return_type_callstack.push(Some(return_type));
+                    } else {
+                        println!(
+                            "{}call to {to} with method {method_name}({{unknown abi}})",
+                            "  ".repeat(return_type_callstack.len()),
+                        );
+                        return_type_callstack.push(None);
+                    }
+                }
+                Receipt::Return { val, .. } if !return_type_callstack.is_empty() => {
+                    println!(
+                        "{}-> returned {val}",
+                        "  ".repeat(return_type_callstack.len()),
+                    );
+                    let _ = return_type_callstack.pop().unwrap();
+                }
+                Receipt::ReturnData { id, ptr, len, .. } if !return_type_callstack.is_empty() => {
+                    if let Some(abi) = abi_by_contract_id.get(id) {
+                        if let Some(return_type) = return_type_callstack.pop().unwrap() {
+                            let reader = MemoryReader::new(vm.memory(), *ptr);
+                            let unified_abi = UnifiedProgramABI::from_counterpart(abi).unwrap();
+
+                            println!(
+                                "{}-> returned {:?}",
+                                "  ".repeat(return_type_callstack.len()),
+                                decoder.decode(&return_type, reader.clone()).unwrap()
+                            );
+                        } else {
+                            unreachable!("abi checked above");
+                        }
+                    } else {
+                        let _ = return_type_callstack.pop().unwrap();
+                        println!(
+                            "{}-> returned {{unknown abi}}",
+                            "  ".repeat(return_type_callstack.len()),
+                        );
+                    }
+                }
+                _ => {}
+            }
+            receipt_count += 1;
+        }
+    };
+
     let mut t = *vm.transact(script_tx).expect("panicked").state();
     loop {
-        if vm.receipts().len() > receipt_count {
-            receipt_count = vm.receipts().len();
-            if let Some(Receipt::Call { to, .. }) = vm.receipts().last() {
-                let fp = vm.registers()[RegId::FP];
-                let call_frame_bytes = vm.memory().read(fp, CallFrame::serialized_size()).unwrap();
-                let call_frame = CallFrame::from_bytes(&call_frame_bytes).unwrap();
-                let decoder = ABIDecoder::new(DecoderConfig::default());
-                let Ok(Token::String(method_name)) = decoder.decode(
-                    &ParamType::String,
-                    MemoryReader::new(vm.memory(), call_frame.a()),
-                ) else {
-                    panic!("Expected string");
-                };
-
-                let args_reader = MemoryReader::new(vm.memory(), call_frame.b());
-                let abi = &abi_by_contract_id[call_frame.to()];
-                let unified_abi = UnifiedProgramABI::from_counterpart(abi).unwrap();
-
-                let type_lookup = unified_abi
-                    .types
-                    .into_iter()
-                    .map(|decl| (decl.type_id, decl))
-                    .collect::<HashMap<_, _>>();
-
-                let func = unified_abi
-                    .functions
-                    .iter()
-                    .find(|f| f.name == method_name)
-                    .unwrap();
-
-                let mut args = Vec::new();
-                for param in &func.inputs {
-                    let param_type =
-                        ParamType::try_from_type_application(&param, &type_lookup).unwrap();
-                    args.push(
-                        decoder
-                            .decode(&param_type, args_reader.clone())
-                            .unwrap()
-                            .to_string(),
-                    );
-                }
-
-                println!(
-                    "call to {to} with method {method_name}({})",
-                    args.join(", ")
-                );
-            }
-        }
-
+        process_new_receipts(&vm);
         match t {
             ProgramState::Return(r) => {
                 println!("done: returned {r:?}");
@@ -213,14 +293,13 @@ async fn main() {
             ProgramState::RunProgram(d) => {
                 match d {
                     DebugEval::Breakpoint(bp) => {
-                        println!(
-                            "at {:>4} reg[0x20] = {:4}, next instruction: {}",
-                            bp.pc(),
-                            &vm.registers()[0x20],
-                            get_next_instruction(&vm)
-                                .map(|i| format!("{i:?}"))
-                                .unwrap_or_else(|| "???".to_owned()),
-                        );
+                        // println!(
+                        //     "at {:>6} next instruction: {}",
+                        //     bp.pc(),
+                        //     get_next_instruction(&vm)
+                        //         .map(|i| format!("{i:?}"))
+                        //         .unwrap_or_else(|| "???".to_owned()),
+                        // );
                     }
                     DebugEval::Continue => {}
                 }
@@ -232,4 +311,6 @@ async fn main() {
             }
         }
     }
+
+    assert_eq!(vm.receipts(), receipts);
 }
