@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use fuel_core_types::{services::executor::StorageReadReplayEvent, tai64::Tai64};
 use fuel_vm::{
     error::{InterpreterError, RuntimeError},
@@ -12,7 +11,7 @@ use fuel_vm::{
     },
 };
 use primitive_types::U256;
-use std::{cell::RefCell, collections::HashMap, io};
+use std::{cell::RefCell, collections::HashMap};
 
 #[derive(Clone)]
 pub struct ShallowStorage {
@@ -187,11 +186,10 @@ impl ContractsAssetsStorage for ShallowStorage {}
 
 #[derive(Debug)]
 pub enum Error {
-    /// Failed to fetch data from the node
-    NetworkError(io::Error),
     /// This block couldn't have been included
     InvalidBlock,
-    Other(anyhow::Error),
+    /// The requested key is out of the available keyspace
+    KeyspaceOverflow,
 }
 impl From<Error> for RuntimeError<Error> {
     fn from(e: Error) -> Self {
@@ -201,11 +199,6 @@ impl From<Error> for RuntimeError<Error> {
 impl From<Error> for InterpreterError<Error> {
     fn from(e: Error) -> Self {
         InterpreterError::Storage(e)
-    }
-}
-impl From<anyhow::Error> for Error {
-    fn from(e: anyhow::Error) -> Self {
-        Self::Other(e)
     }
 }
 
@@ -231,14 +224,9 @@ impl InterpreterStorage for ShallowStorage {
         match height {
             height if height > self.block_height => Err(Error::InvalidBlock),
             height if height == self.block_height => Ok(self.timestamp.0),
-            height => tokio::runtime::Handle::current().block_on(async {
+            height => {
                 todo!("timestamp {height:?}");
-                // match self.client.block_by_height(height).await {
-                //     Ok(Some(block)) => Ok(block.header.time.0),
-                //     Ok(None) => Err(Error::InvalidBlock),
-                //     Err(e) => Err(Error::NetworkError(e)),
-                // }
-            }),
+            }
         }
     }
 
@@ -251,14 +239,7 @@ impl InterpreterStorage for ShallowStorage {
         if block_height >= self.block_height || block_height == Default::default() {
             Ok(Bytes32::zeroed())
         } else {
-            tokio::runtime::Handle::current().block_on(async {
-                todo!("block_hash {block_height:?}");
-                // match self.client.block_by_height(block_height).await {
-                //     Ok(Some(block)) => Ok(block.id),
-                //     Ok(None) => Err(Error::InvalidBlock),
-                //     Err(e) => Err(Error::NetworkError(e)),
-                // }
-            })
+            todo!("block_hash {block_height:?}");
         }
     }
 
@@ -290,6 +271,7 @@ impl InterpreterStorage for ShallowStorage {
     ) -> Result<Vec<Option<std::borrow::Cow<fuel_vm::storage::ContractsStateData>>>, Self::DataError>
     {
         log::debug!("contract_state_range {id:?} {start_key:?} {range:?}");
+
         let mut results = Vec::new();
         let mut key = U256::from_big_endian(start_key.as_ref());
         let mut key_buffer = Bytes32::zeroed();
@@ -297,7 +279,7 @@ impl InterpreterStorage for ShallowStorage {
             if offset != 0 {
                 key = key
                     .checked_add(1.into())
-                    .ok_or_else(|| anyhow!("range op exceeded available keyspace"))?;
+                    .ok_or_else(|| Error::KeyspaceOverflow)?;
             }
 
             key.to_big_endian(key_buffer.as_mut());
@@ -320,9 +302,6 @@ impl InterpreterStorage for ShallowStorage {
         I: Iterator<Item = &'a [u8]>,
     {
         log::debug!("contract_state_insert_range {contract:?} {start_key:?}");
-        // We need to return the number of keys that were previously unset
-        // self.contract_state_range(contract, start_key, values.count())
-        //     .map(|values| values.iter().filter(|v| dbg!(v).is_none()).count())
 
         let values: Vec<_> = values.collect();
         let mut key = U256::from_big_endian(start_key.as_ref());
@@ -333,7 +312,7 @@ impl InterpreterStorage for ShallowStorage {
             if idx != 0 {
                 key = key
                     .checked_add(1.into())
-                    .ok_or_else(|| anyhow!("range op exceeded available keyspace"))?;
+                    .ok_or_else(|| Error::KeyspaceOverflow)?;
             }
 
             key.to_big_endian(key_buffer.as_mut());
@@ -357,14 +336,28 @@ impl InterpreterStorage for ShallowStorage {
         range: usize,
     ) -> Result<Option<()>, Self::DataError> {
         log::debug!("contract_state_remove_range {contract:?} {start_key:?}");
-        if self
-            .contract_state_range(contract, start_key, range)?
-            .iter()
-            .any(|v| v.is_none())
-        {
-            Ok(None)
-        } else {
-            Ok(Some(()))
+
+        let mut key = U256::from_big_endian(start_key.as_ref());
+        let mut key_buffer = Bytes32::zeroed();
+
+        let mut found_unset = false;
+        for idx in 0..range {
+            if idx != 0 {
+                key = key
+                    .checked_add(1.into())
+                    .ok_or_else(|| Error::KeyspaceOverflow)?;
+            }
+
+            key.to_big_endian(key_buffer.as_mut());
+            let option = self
+                .storage::<ContractsState>()
+                .take(&(contract, Bytes32::from_bytes_ref(&key_buffer)).into())?;
+
+            if option.is_none() {
+                found_unset = true;
+            }
         }
+
+        Ok(if found_unset { Some(()) } else { None })
     }
 }
