@@ -5,12 +5,12 @@ use fuel_abi_types::abi::{
     unified_program::{UnifiedProgramABI, UnifiedTypeDeclaration},
 };
 use fuel_vm::prelude::ContractId;
-use fuels::types::Token;
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 mod callret;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, ToSchema)]
 pub struct TraceOptions {
     callret: bool,
 }
@@ -83,22 +83,28 @@ impl Tracers {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum TraceEvent {
     Call {
         /// Which receipt this call corresponds to.
+        #[schema(examples(0))]
         receipt: usize,
         /// Method being called. `None` if param1 doesn't point to a string.
+        #[schema(examples("method_name"))]
         method: Option<String>,
         /// Method being called. `None` if `method` couldn't be resolved,
         /// or if arguments couldn't be parsed due to unknown ABI or invalid form.
-        arguments: Option<Vec<Token>>,
+        #[schema(examples(json!(["U64(42)", "String(\"Limiting Factor\")"])))]
+        arguments: Option<Vec<String>>,
     },
     Return {
         /// Which receipt this call corresponds to.
+        #[schema(examples(1))]
         receipt: usize,
         /// Return value. `None` if unknown ABI or invalid form.
         /// Also contains `None` if no data is returned, i.e. using `ret` instead of `retd`.
-        value: Option<Token>,
+        #[schema(examples(json!(["Array(U64(0), U64(1), U64(2))"])))]
+        value: Option<String>,
     },
 }

@@ -15,6 +15,8 @@ use fuel_core_client::client::FuelClient;
 use fuel_vm::prelude::ContractId;
 use local_trace_client::TraceError;
 use serde::Serialize;
+use utoipa::{openapi::Server, OpenApi, ToSchema};
+use utoipa_swagger_ui::SwaggerUi;
 
 #[derive(FromRequest)]
 #[from_request(via(axum::Json), rejection(AppError))]
@@ -48,18 +50,19 @@ impl From<TraceError> for AppError {
     }
 }
 
+#[derive(Serialize, ToSchema)]
+struct ErrorResponse {
+    #[schema(examples("Error message"))]
+    message: String,
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        #[derive(Serialize)]
-        struct ErrorResponse {
-            message: String,
-        }
-
         let (status, message) = match self {
             AppError::JsonRejection(rejection) => (rejection.status(), rejection.body_text()),
             AppError::Health => (
                 StatusCode::BAD_GATEWAY,
-                format!("request to fuel-core instance failed"),
+                format!("request to fuel-core failed"),
             ),
             AppError::InvalidAbiJson { contract, error } => (
                 StatusCode::BAD_REQUEST,
@@ -68,7 +71,7 @@ impl IntoResponse for AppError {
             AppError::Trace(err) => match err {
                 TraceError::Network(error) => (
                     StatusCode::BAD_GATEWAY,
-                    format!("request to fuel-core instance failed: {}", error),
+                    format!("request to fuel-core  ailed: {}", error),
                 ),
                 TraceError::NoSuchBlock => (StatusCode::NOT_FOUND, format!("Block not found")),
                 TraceError::ReceiptsMismatch(_) => (
@@ -85,6 +88,13 @@ impl IntoResponse for AppError {
         (status, AppJson(ErrorResponse { message })).into_response()
     }
 }
+
+#[derive(OpenApi)]
+#[openapi(
+    info(title = "Execution tracing proxy for fuel-core"),
+    paths(routes::health::route, routes::trace_block::route,)
+)]
+struct ApiDoc;
 
 /// Execution tracing demo
 #[derive(Parser, Debug)]
@@ -104,7 +114,16 @@ async fn main() -> anyhow::Result<()> {
 
     let client = FuelClient::new(args.fuel_core).context("Failed to create FuelClient")?;
 
+    let listener = tokio::net::TcpListener::bind(args.bind).await?;
+    let addr = listener.local_addr()?;
+
+    let mut api_doc = ApiDoc::openapi();
+    api_doc.servers = Some(vec![Server::new(addr.to_string())]);
+    let api_doc = api_doc.to_pretty_json().unwrap();
+
     let app = Router::new()
+        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
+        .route("/docs", get(move || async { api_doc }))
         .route(
             "/health",
             get({
@@ -117,8 +136,8 @@ async fn main() -> anyhow::Result<()> {
             post(|path| routes::trace_block::route(client, path)),
         )
         .fallback((StatusCode::NOT_FOUND, "404 NOT FOUND"));
-    let listener = tokio::net::TcpListener::bind(args.bind).await?;
-    tracing::debug!("Listening on {}", listener.local_addr().unwrap());
+
+    tracing::debug!("Serving on {}", addr);
     axum::serve(listener, app).await.unwrap();
     Ok(())
 }
