@@ -1,5 +1,5 @@
-use fuel_execution_trace::trace_block;
 use fuel_core_client::client::FuelClient;
+use fuel_execution_trace::trace_block;
 use fuel_vm::{fuel_types::BlockHeight, prelude::ContractId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

@@ -9,8 +9,8 @@
     clippy::string_slice
 )]
 
-mod shallow_storage;
 mod memory_reader;
+mod shallow_storage;
 
 pub use memory_reader::MemoryReader;
 

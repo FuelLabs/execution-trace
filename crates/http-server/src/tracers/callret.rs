@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
+use fuel_execution_trace::{MemoryReader, Vm};
 use fuel_vm::prelude::{ContractId, Receipt};
 use fuels::{
     core::codec::{ABIDecoder, DecoderConfig},
     types::{param_types::ParamType, Token},
 };
-use fuel_execution_trace::{Vm, MemoryReader};
 
 use super::{Abi, TraceEvent, Tracer};
 

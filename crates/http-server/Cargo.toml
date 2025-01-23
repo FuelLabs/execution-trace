@@ -19,5 +19,6 @@ tokio.workspace = true
 tracing.workspace = true
 
 axum = { version = "0.8", features = ["macros"] }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 utoipa = { version = "5", features = ["axum_extras"]}
 utoipa-swagger-ui = { version = "9.0.0", features = ["axum", "reqwest", "vendored"] }

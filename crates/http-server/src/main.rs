@@ -22,9 +22,10 @@ use axum::{
 };
 use clap::Parser;
 use fuel_core_client::client::FuelClient;
-use fuel_vm::prelude::ContractId;
 use fuel_execution_trace::TraceError;
+use fuel_vm::prelude::ContractId;
 use serde::Serialize;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use utoipa::{openapi::Server, OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -111,18 +112,32 @@ struct ApiDoc;
 #[command(version, about)]
 pub struct Args {
     /// Fuel core GraphQL endopoint
-    #[clap(long, env = "FUEL_CORE")]
+    #[clap(
+        long,
+        env = "FUEL_CORE",
+        default_value = "http://localhost:4000/graphql"
+    )]
     pub fuel_core: String,
     /// Address to bind to
-    #[clap(short, long, env = "TRACING_BIND")]
+    #[clap(short, long, env = "TRACING_BIND", default_value = "0.0.0.0:4001")]
     pub bind: String,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(EnvFilter::from_default_env())
+        .init();
+
     let args = Args::parse();
 
     let client = FuelClient::new(args.fuel_core).context("Failed to create FuelClient")?;
+    let chain_info = client
+        .chain_info()
+        .await
+        .context("Failed to connect to fuel-core")?;
+    tracing::info!("Connected to {}", chain_info.name);
 
     let listener = tokio::net::TcpListener::bind(args.bind).await?;
     let addr = listener.local_addr()?;
