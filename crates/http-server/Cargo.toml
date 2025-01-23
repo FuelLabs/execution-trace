@@ -1,0 +1,23 @@
+[package]
+name = "fuel-execution-trace-http-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fuel-execution-trace.workspace = true
+
+fuel-core-client.workspace = true
+fuel-vm.workspace = true
+fuels.workspace = true
+fuel-abi-types.workspace = true
+
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+axum = { version = "0.8", features = ["macros"] }
+utoipa = { version = "5", features = ["axum_extras"]}
+utoipa-swagger-ui = { version = "9.0.0", features = ["axum", "reqwest", "vendored"] }

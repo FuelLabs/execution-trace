@@ -1,4 +1,14 @@
-mod memory_reader;
+#![deny(unsafe_code)]
+#![deny(unused_must_use)]
+#![deny(unused_crate_dependencies)]
+#![deny(
+    clippy::arithmetic_side_effects,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::string_slice
+)]
+
 mod routes;
 mod tracers;
 
@@ -13,7 +23,7 @@ use axum::{
 use clap::Parser;
 use fuel_core_client::client::FuelClient;
 use fuel_vm::prelude::ContractId;
-use local_trace_client::TraceError;
+use fuel_execution_trace::TraceError;
 use serde::Serialize;
 use utoipa::{openapi::Server, OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;

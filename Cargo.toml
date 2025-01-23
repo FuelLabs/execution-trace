@@ -1,33 +1,56 @@
-[package]
-name = "fuel-execution-trace"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+members = [
+  "crates/execution-trace",
+  "crates/http-server",
+]
+resolver = "2"
 
-[dependencies]
-fuel-core-client = { path = "../fuel-core/crates/client" }
-fuel-core-types =  { path = "../fuel-core/crates/types" }
-fuel-vm = { version = "0.59.1" }
-fuels = { git = "https://github.com/FuelLabs/fuels-rs", branch = "dento/streaming-decoder" }
-# fuels = "0.66"
+[profile.release]
+codegen-units = 1
+lto = "fat"
+panic = "unwind"
+
+[workspace.package]
+authors = ["Fuel Labs <contact@fuel.sh>"]
+categories = ["concurrency", "cryptography::cryptocurrencies", "emulators"]
+edition = "2021"
+homepage = "https://fuel.network/"
+keywords = ["blockchain", "cryptocurrencies", "fuel-vm", "vm"]
+license = "BUSL-1.1"
+repository = "https://github.com/FuelLabs/fuel-core"
+version = "0.1.0"
+
+[workspace.dependencies]
+# Workspace members
+fuel-execution-trace = { version = "0.1.0", path = "./crates/execution-trace", default-features = false }
+fuel-execution-trace-http-server = { version = "0.1.0", path = "./crates/http-server", default-features = false }
+
+# Fuel dependencies
+fuels = "0.66.9"
+# fuel-vm = "0.59.2"
+fuel-vm = { git = "https://github.com/FuelLabs/fuel-vm" }
+fuel-core-client = { git = "https://github.com/FuelLabs/fuel-core", branch = "dento/execution-trace"}
+fuel-core-types =  { git = "https://github.com/FuelLabs/fuel-core", branch = "dento/execution-trace"}
 fuel-abi-types = "0.8"
 
-primitive-types = { version = "0.12", default-features = false }
-hex = "0.4.3"
-
+# External dependencies
 anyhow = "1"
-thiserror = "2"
-tokio = { version = "1", features = ["full"] }
+clap = { version = "4.5.26", features = ["derive", "env"] }
+hex = "0.4.3"
 log = "0.4"
 pretty_env_logger = "0.4"
-
+primitive-types = { version = "0.12", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-clap = { version = "4.5.26", features = ["derive", "env"] }
-axum = { version = "0.8", features = ["macros"] }
-utoipa = { version = "5", features = ["axum_extras"]}
-axum-macros = "0.5"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
 tracing = "0.1.41"
-utoipa-swagger-ui = { version = "9.0.0", features = ["axum", "reqwest", "vendored"] }
 
 [patch.crates-io]
-fuel-vm = { path = "../fuel-vm/fuel-vm" }
+fuels = { git = "https://github.com/FuelLabs/fuels-rs", branch = "dento/streaming-decoder" }
+fuel-vm = { git = "https://github.com/FuelLabs/fuel-vm" }
+fuel-core-client = { git = "https://github.com/FuelLabs/fuel-core", branch = "dento/execution-trace"}
+fuel-core-types =  { git = "https://github.com/FuelLabs/fuel-core", branch = "dento/execution-trace"}
+
+[patch.'https://github.com/FuelLabs/fuel-core'] # Override fuel-vm for fuel-core deps as well
+fuel-vm = { git = "https://github.com/FuelLabs/fuel-vm" }

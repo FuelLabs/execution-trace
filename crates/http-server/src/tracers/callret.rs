@@ -5,9 +5,7 @@ use fuels::{
     core::codec::{ABIDecoder, DecoderConfig},
     types::{param_types::ParamType, Token},
 };
-use local_trace_client::Vm;
-
-use crate::memory_reader::MemoryReader;
+use fuel_execution_trace::{Vm, MemoryReader};
 
 use super::{Abi, TraceEvent, Tracer};
 

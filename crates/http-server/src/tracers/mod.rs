@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use fuel_execution_trace::Vm;
 
 use fuel_abi_types::abi::{
     program::ProgramABI,
@@ -32,7 +33,7 @@ impl TraceOptions {
 trait Tracer: Send + Sync + 'static {
     fn callback(
         &mut self,
-        vm: &local_trace_client::Vm,
+        vm: &Vm,
         abis: &HashMap<ContractId, Abi>,
     ) -> Vec<TraceEvent>;
 }
@@ -71,7 +72,7 @@ pub struct Tracers {
 }
 
 impl Tracers {
-    pub fn callback(&mut self, vm: &local_trace_client::Vm) {
+    pub fn callback(&mut self, vm: &fuel_execution_trace::Vm) {
         for tracer in &mut self.tracers {
             let out = tracer.callback(vm, &self.abis);
             self.output.extend(out);

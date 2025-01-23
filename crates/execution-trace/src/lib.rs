@@ -1,4 +1,18 @@
+#![deny(unsafe_code)]
+#![deny(unused_must_use)]
+#![deny(unused_crate_dependencies)]
+#![deny(
+    clippy::arithmetic_side_effects,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::string_slice
+)]
+
 mod shallow_storage;
+mod memory_reader;
+
+pub use memory_reader::MemoryReader;
 
 use std::cell::RefCell;
 
