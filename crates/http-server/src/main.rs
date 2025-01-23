@@ -16,7 +16,7 @@ use anyhow::Context;
 use axum::{
     extract::{rejection::JsonRejection, FromRequest},
     http::StatusCode,
-    response::{IntoResponse, Response},
+    response::{Html, IntoResponse, Response},
     routing::{get, post},
     Router,
 };
@@ -26,7 +26,7 @@ use fuel_execution_trace::TraceError;
 use fuel_vm::prelude::ContractId;
 use serde::Serialize;
 use tracing_subscriber::EnvFilter;
-use utoipa::{openapi::Server, OpenApi, ToSchema};
+use utoipa::{OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
 
 #[derive(FromRequest)]
@@ -143,13 +143,12 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(args.bind).await?;
     let addr = listener.local_addr()?;
 
-    let mut api_doc = ApiDoc::openapi();
-    api_doc.servers = Some(vec![Server::new(addr.to_string())]);
-    let api_doc = api_doc.to_pretty_json().unwrap();
-
     let app = Router::new()
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
-        .route("/docs", get(move || async { api_doc }))
+        .route(
+            "/",
+            get(|| async { Html(r#"<a href="/swagger-ui">See API docs</a>"#) }),
+        )
         .route(
             "/health",
             get({
