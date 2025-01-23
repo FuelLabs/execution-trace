@@ -25,7 +25,7 @@ use fuel_core_client::client::FuelClient;
 use fuel_execution_trace::TraceError;
 use fuel_vm::prelude::ContractId;
 use serde::Serialize;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tracing_subscriber::EnvFilter;
 use utoipa::{openapi::Server, OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -125,9 +125,10 @@ pub struct Args {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .with(EnvFilter::from_default_env())
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
         .init();
 
     let args = Args::parse();
