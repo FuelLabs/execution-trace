@@ -34,6 +34,7 @@ impl ShallowStorage {
                 return r.value.clone();
             }
         }
+        dbg!(&reads);
         panic!("No reads for {} {}", column, hex::encode(&key));
     }
 
@@ -49,10 +50,14 @@ impl ShallowStorage {
         &self,
         column: &'static str,
         key: Vec<u8>,
-        value: Vec<u8>,
+        value: Option<Vec<u8>>,
     ) -> Option<Vec<u8>> {
         let mut writes = self.storage_write_mask.borrow_mut();
-        let old_value = writes.entry(column).or_default().insert(key.clone(), value);
+        let old_value = if let Some(value) = value {
+            writes.entry(column).or_default().insert(key.clone(), value)
+        } else {
+            writes.entry(column).or_default().remove(&key)
+        };
         if old_value.is_none() {
             self.initial_value_of_column(column, key)
         } else {
@@ -63,10 +68,13 @@ impl ShallowStorage {
 
 macro_rules! storage_rw {
     ($table:ident, $convert_key:expr, $convert_value:expr, $convert_value_back:expr $(,)?) => {
+        storage_rw!($table = $table, $convert_key, $convert_value, $convert_value_back);
+    };
+    ($table:ident = $event_name:ident, $convert_key:expr, $convert_value:expr, $convert_value_back:expr $(,)?) => {
         impl StorageSize<$table> for ShallowStorage {
             fn size_of_value(&self, key: &<$table as fuel_vm::fuel_storage::Mappable>::Key) -> Result<Option<usize>, Self::Error> {
-                tracing::debug!("{} size_of_value??? {}", stringify!($table), hex::encode(&$convert_key(key)));
-                let head = self.value_of_column(stringify!($table), $convert_key(key));
+                tracing::debug!("{} size_of_value??? {}", stringify!($event_name), hex::encode(&$convert_key(key)));
+                let head = self.value_of_column(stringify!($event_name), $convert_key(key));
                 Ok(head.map(|v| v.len()))
             }
         }
@@ -75,14 +83,14 @@ macro_rules! storage_rw {
             type Error = Error;
 
             fn get(&self, key: &<$table as fuel_vm::fuel_storage::Mappable>::Key) -> Result<Option<std::borrow::Cow<<$table as fuel_vm::fuel_storage::Mappable>::OwnedValue>>, Self::Error> {
-                tracing::debug!("{} get {}", stringify!($table), hex::encode(&$convert_key(key)));
-                let head = self.value_of_column(stringify!($table), $convert_key(key));
+                tracing::debug!("{} get {}", stringify!($event_name), hex::encode(&$convert_key(key)));
+                let head = self.value_of_column(stringify!($event_name), $convert_key(key));
                 Ok(head.map($convert_value).map(std::borrow::Cow::Owned))
             }
 
             fn contains_key(&self, key: &<$table as fuel_vm::fuel_storage::Mappable>::Key) -> Result<bool, Self::Error> {
-                tracing::debug!("{} contains_key {}", stringify!($table), hex::encode(&$convert_key(key)));
-                let head = self.value_of_column(stringify!($table), $convert_key(key));
+                tracing::debug!("{} contains_key {}", stringify!($event_name), hex::encode(&$convert_key(key)));
+                let head = self.value_of_column(stringify!($event_name), $convert_key(key));
                 Ok(head.is_some())
             }
         }
@@ -94,8 +102,8 @@ macro_rules! storage_rw {
                 offset: usize,
                 buf: &mut [u8],
             ) -> Result<Option<usize>, Self::Error> {
-                tracing::debug!("{} read {}", stringify!($table), hex::encode(&$convert_key(key)),);
-                let head = self.value_of_column(stringify!($table), $convert_key(key));
+                tracing::debug!("{} read {}", stringify!($event_name), hex::encode(&$convert_key(key)),);
+                let head = self.value_of_column(stringify!($event_name), $convert_key(key));
                 let Some(value) = head else {
                     return Ok(None);
                 };
@@ -104,7 +112,7 @@ macro_rules! storage_rw {
             }
 
             fn read_alloc(&self, key: &<$table as fuel_vm::fuel_storage::Mappable>::Key) -> Result<Option<Vec<u8>>, Self::Error> {
-                todo!("{} read_alloc {}", stringify!($table), hex::encode(&$convert_key(key)))
+                todo!("{} read_alloc {}", stringify!($event_name), hex::encode(&$convert_key(key)))
             }
         }
 
@@ -114,12 +122,13 @@ macro_rules! storage_rw {
                 key: &<$table as fuel_vm::fuel_storage::Mappable>::Key,
                 value: &<$table as fuel_vm::fuel_storage::Mappable>::Value,
             ) -> Result<Option<<$table as fuel_vm::fuel_storage::Mappable>::OwnedValue>, Self::Error> {
-                tracing::debug!("{} replace {} (value={value:?})", stringify!($table), hex::encode(&$convert_key(key)));
-                Ok(self.replace_column(stringify!($table), $convert_key(key), $convert_value_back(value)).map($convert_value))
+                tracing::debug!("{} replace {} (value={value:?})", stringify!($event_name), hex::encode(&$convert_key(key)));
+                Ok(self.replace_column(stringify!($event_name), $convert_key(key), Some($convert_value_back(value))).map($convert_value))
             }
 
             fn take(&mut self, key: &<$table as fuel_vm::fuel_storage::Mappable>::Key) -> Result<Option<<$table as fuel_vm::fuel_storage::Mappable>::OwnedValue>, Self::Error> {
-                todo!("{} take {}", stringify!($table), hex::encode(&$convert_key(key)))
+                tracing::debug!("{} take {}", stringify!($event_name), hex::encode(&$convert_key(key)));
+                Ok(self.replace_column(stringify!($event_name), $convert_key(key), None).map($convert_value))
             }
         }
 
@@ -134,8 +143,8 @@ macro_rules! storage_rw {
                 key: &<$table as fuel_vm::fuel_storage::Mappable>::Key,
                 buf: &[u8],
             ) -> Result<(usize, Option<Vec<u8>>), Self::Error> {
-                tracing::debug!("{} replace_bytes {key:?}", stringify!($table));
-                let head = self.value_of_column(stringify!($table), $convert_key(key));
+                tracing::debug!("{} replace_bytes {key:?}", stringify!($event_name));
+                let head = self.value_of_column(stringify!($event_name), $convert_key(key));
                 Ok((buf.len(), head))
             }
 
@@ -150,13 +159,13 @@ storage_rw!(
     ContractsRawCode,
     |key: &ContractId| -> Vec<u8> { (**key).to_vec() },
     |data| todo!("ContractsRawCode from bytes {data:?}"),
-    |data| todo!("ContractsRawCode to bytes {data:?}"),
+    |data| -> Vec<u8> { todo!("ContractsRawCode to bytes {data:?}") },
 );
 storage_rw!(
     ContractsState,
     |key: &ContractsStateKey| -> Vec<u8> { key.as_ref().into() },
     |data| { ContractsStateData(data) },
-    |data: &[u8]| { data.to_vec() },
+    |data: &[u8]| -> Vec<u8> { data.to_vec() },
 );
 storage_rw!(
     ContractsAssets,
@@ -167,19 +176,19 @@ storage_rw!(
         buffer.copy_from_slice(&data);
         u64::from_be_bytes(buffer)
     },
-    |data: &u64| data.to_be_bytes().to_vec(),
+    |data: &u64| -> Vec<u8> { data.to_be_bytes().to_vec() },
 );
 storage_rw!(
     UploadedBytecodes,
     |key: &Bytes32| -> Vec<u8> { key.as_ref().into() },
     |data| todo!("UploadedBytecodes from bytes {data:?}"),
-    |data| todo!("UploadedBytecodes to bytes {data:?}"),
+    |data| -> Vec<u8> { todo!("UploadedBytecodes to bytes {data:?}") },
 );
 storage_rw!(
-    BlobData,
+    BlobData = Blobs,
     |key: &BlobId| -> Vec<u8> { key.as_ref().into() },
     |data| todo!("BlobData from bytes {data:?}"),
-    |data| todo!("BlobData to bytes {data:?}"),
+    |data| -> Vec<u8> { todo!("BlobData to bytes {data:?}") },
 );
 
 impl ContractsAssetsStorage for ShallowStorage {}
