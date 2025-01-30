@@ -20,7 +20,7 @@ pub struct ShallowStorage {
     pub consensus_parameters_version: u32,
     pub state_transition_version: u32,
     pub coinbase: fuel_vm::prelude::ContractId,
-    pub storage_write_mask: RefCell<HashMap<&'static str, HashMap<Vec<u8>, Vec<u8>>>>,
+    pub storage_write_mask: RefCell<HashMap<&'static str, HashMap<Vec<u8>, Option<Vec<u8>>>>>,
     pub storage_reads: RefCell<Vec<StorageReadReplayEvent>>,
 }
 
@@ -41,7 +41,7 @@ impl ShallowStorage {
     fn value_of_column(&self, column: &str, key: Vec<u8>) -> Option<Vec<u8>> {
         let writes = self.storage_write_mask.borrow();
         if let Some(value) = writes.get(column).and_then(|c| c.get(&key)) {
-            return Some(value.clone());
+            return value.clone();
         }
         self.initial_value_of_column(column, key)
     }
@@ -53,15 +53,11 @@ impl ShallowStorage {
         value: Option<Vec<u8>>,
     ) -> Option<Vec<u8>> {
         let mut writes = self.storage_write_mask.borrow_mut();
-        let old_value = if let Some(value) = value {
-            writes.entry(column).or_default().insert(key.clone(), value)
-        } else {
-            writes.entry(column).or_default().remove(&key)
-        };
-        if old_value.is_none() {
-            self.initial_value_of_column(column, key)
-        } else {
+        let old_value = writes.entry(column).or_default().insert(key.clone(), value);
+        if let Some(old_value) = old_value {
             old_value
+        } else {
+            self.initial_value_of_column(column, key)
         }
     }
 }
@@ -73,7 +69,7 @@ macro_rules! storage_rw {
     ($table:ident = $event_name:ident, $convert_key:expr, $convert_value:expr, $convert_value_back:expr $(,)?) => {
         impl StorageSize<$table> for ShallowStorage {
             fn size_of_value(&self, key: &<$table as fuel_vm::fuel_storage::Mappable>::Key) -> Result<Option<usize>, Self::Error> {
-                tracing::debug!("{} size_of_value??? {}", stringify!($event_name), hex::encode(&$convert_key(key)));
+                tracing::debug!("{} size_of_value {}", stringify!($event_name), hex::encode(&$convert_key(key)));
                 let head = self.value_of_column(stringify!($event_name), $convert_key(key));
                 Ok(head.map(|v| v.len()))
             }
@@ -107,6 +103,10 @@ macro_rules! storage_rw {
                 let Some(value) = head else {
                     return Ok(None);
                 };
+
+                if offset > value.len() || offset.saturating_add(buf.len()) > value.len() {
+                    return Err(Error::CannotRead);
+                }
                 buf.copy_from_slice(&value[offset..][..buf.len()]);
                 Ok(Some(buf.len()))
             }
@@ -144,7 +144,7 @@ macro_rules! storage_rw {
                 buf: &[u8],
             ) -> Result<(usize, Option<Vec<u8>>), Self::Error> {
                 tracing::debug!("{} replace_bytes {key:?}", stringify!($event_name));
-                let head = self.value_of_column(stringify!($event_name), $convert_key(key));
+                let head = self.replace_column(stringify!($event_name), $convert_key(key), None);
                 Ok((buf.len(), head))
             }
 
@@ -199,6 +199,8 @@ pub enum Error {
     InvalidBlock,
     /// The requested key is out of the available keyspace
     KeyspaceOverflow,
+    /// Read offset too large, or buffer too small
+    CannotRead,
 }
 impl From<Error> for RuntimeError<Error> {
     fn from(e: Error) -> Self {
@@ -367,6 +369,6 @@ impl InterpreterStorage for ShallowStorage {
             }
         }
 
-        Ok(if found_unset { Some(()) } else { None })
+        Ok(if found_unset { None } else { Some(()) })
     }
 }
