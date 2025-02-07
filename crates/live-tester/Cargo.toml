@@ -1,0 +1,16 @@
+[package]
+name = "fuel-execution-trace-live-tester"
+publish = false
+authors.workspace = true
+categories.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+reqwest = "0.12"
+tokio.workspace = true
+serde.workspace = true

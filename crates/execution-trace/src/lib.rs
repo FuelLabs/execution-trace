@@ -48,7 +48,7 @@ pub enum TraceError {
     #[error("Transaction failed checking")]
     CheckTransaction(TxId, CheckError),
     #[error("Local execution produced different receipts")]
-    ReceiptsMismatch(Vec<Receipt>),
+    ReceiptsMismatch(TxId, Vec<Receipt>),
 }
 
 /// The VM type used for tracing
@@ -152,7 +152,10 @@ where
         }
 
         if vm.receipts() != receipts {
-            return Err(TraceError::ReceiptsMismatch(vm.receipts().to_vec()));
+            return Err(TraceError::ReceiptsMismatch(
+                (*tx_id).into(),
+                vm.receipts().to_vec(),
+            ));
         }
 
         storage = vm.as_ref().clone();

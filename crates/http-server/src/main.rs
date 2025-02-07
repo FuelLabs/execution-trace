@@ -82,12 +82,12 @@ impl IntoResponse for AppError {
             AppError::Trace(err) => match err {
                 TraceError::Network(error) => (
                     StatusCode::BAD_GATEWAY,
-                    format!("request to fuel-core  ailed: {}", error),
+                    format!("request to fuel-core failed: {}", error),
                 ),
                 TraceError::NoSuchBlock => (StatusCode::NOT_FOUND, format!("Block not found")),
-                TraceError::ReceiptsMismatch(_) => (
+                TraceError::ReceiptsMismatch(tx, _) => (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Receipts mismatch"),
+                    format!("Receipts mismatch for {tx:?}"),
                 ),
                 other => (
                     StatusCode::INTERNAL_SERVER_ERROR,

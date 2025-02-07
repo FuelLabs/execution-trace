@@ -70,8 +70,7 @@ pub struct Tracers {
 impl Tracers {
     pub fn callback(&mut self, vm: &fuel_execution_trace::Vm) {
         for tracer in &mut self.tracers {
-            let out = tracer.callback(vm, &self.abis);
-            self.output.extend(out);
+            self.output.extend(tracer.callback(vm, &self.abis));
         }
     }
 
