@@ -89,21 +89,20 @@ where
         .await?
         .ok_or(TraceError::NoConsensusParameters)?;
 
-    let storage = ShallowStorage {
+    let mut storage = ShallowStorage {
         block_height,
         timestamp: block.header.time,
         consensus_parameters_version: block.header.consensus_parameters_version,
         state_transition_version: block.header.state_transition_bytecode_version,
         coinbase,
-        storage_write_mask: Default::default(),
-        storage_reads: RefCell::new(storage_reads),
+        storage: RefCell::new(ShallowStorage::initial_storage(storage_reads)),
     };
 
     for tx_id in block.transactions.iter().take(block.transactions.len() - 1) {
         let tx = client
             .transaction(&tx_id)
             .await?
-            .ok_or_else(|| TraceError::MissingTransaction((*mint_tx_id).into()))?;
+            .ok_or_else(|| TraceError::MissingTransaction((*tx_id).into()))?;
 
         let receipts = match tx.status {
             TransactionStatus::Success { receipts, .. } => receipts,
@@ -155,6 +154,8 @@ where
         if vm.receipts() != receipts {
             return Err(TraceError::ReceiptsMismatch(vm.receipts().to_vec()));
         }
+
+        storage = vm.as_ref().clone();
     }
 
     Ok(())

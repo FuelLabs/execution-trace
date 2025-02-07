@@ -13,6 +13,8 @@ use fuel_vm::{
 use primitive_types::U256;
 use std::{cell::RefCell, collections::HashMap};
 
+type InnerStorage = HashMap<String, HashMap<Vec<u8>, Option<Vec<u8>>>>;
+
 #[derive(Clone)]
 pub struct ShallowStorage {
     pub block_height: BlockHeight,
@@ -20,30 +22,23 @@ pub struct ShallowStorage {
     pub consensus_parameters_version: u32,
     pub state_transition_version: u32,
     pub coinbase: fuel_vm::prelude::ContractId,
-    pub storage_write_mask: RefCell<HashMap<&'static str, HashMap<Vec<u8>, Option<Vec<u8>>>>>,
-    pub storage_reads: RefCell<Vec<StorageReadReplayEvent>>,
+    pub storage: RefCell<InnerStorage>,
 }
 
 impl ShallowStorage {
-    fn initial_value_of_column(&self, column: &str, key: Vec<u8>) -> Option<Vec<u8>> {
-        tracing::trace!("Attempting to read {} {}", column, hex::encode(&key));
-        let reads = self.storage_reads.borrow();
-        for r in reads.iter() {
-            if r.column == column && &r.key == &key {
-                tracing::trace!("-> ok {} {}", r.column, hex::encode(&r.key));
-                return r.value.clone();
-            }
+    pub fn initial_storage(reads: Vec<StorageReadReplayEvent>) -> InnerStorage {
+        let mut storage: InnerStorage = HashMap::new();
+        for read in reads {
+            storage
+                .entry(read.column)
+                .or_default()
+                .insert(read.key, read.value);
         }
-        dbg!(&reads);
-        panic!("No reads for {} {}", column, hex::encode(&key));
+        storage
     }
 
     fn value_of_column(&self, column: &str, key: Vec<u8>) -> Option<Vec<u8>> {
-        let writes = self.storage_write_mask.borrow();
-        if let Some(value) = writes.get(column).and_then(|c| c.get(&key)) {
-            return value.clone();
-        }
-        self.initial_value_of_column(column, key)
+        self.storage.borrow().get(column)?.get(&key)?.clone()
     }
 
     fn replace_column(
@@ -52,13 +47,11 @@ impl ShallowStorage {
         key: Vec<u8>,
         value: Option<Vec<u8>>,
     ) -> Option<Vec<u8>> {
-        let mut writes = self.storage_write_mask.borrow_mut();
-        let old_value = writes.entry(column).or_default().insert(key.clone(), value);
-        if let Some(old_value) = old_value {
-            old_value
-        } else {
-            self.initial_value_of_column(column, key)
-        }
+        self.storage
+            .borrow_mut()
+            .entry(column.to_owned())
+            .or_default()
+            .insert(key.clone(), value)?
     }
 }
 
