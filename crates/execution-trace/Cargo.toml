@@ -12,6 +12,7 @@ version.workspace = true
 [dependencies]
 fuel-core-client.workspace = true
 fuel-core-types.workspace = true
+fuel-core-storage.workspace = true
 fuel-vm.workspace = true
 
 hex.workspace = true

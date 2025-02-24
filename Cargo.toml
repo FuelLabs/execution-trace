@@ -2,6 +2,7 @@
 members = [
   "crates/execution-trace",
   "crates/http-server",
+  "crates/live-tester",
 ]
 resolver = "2"
 
@@ -26,11 +27,12 @@ fuel-execution-trace = { version = "0.1.0", path = "./crates/execution-trace", d
 fuel-execution-trace-http-server = { version = "0.1.0", path = "./crates/http-server", default-features = false }
 
 # Fuel dependencies
-fuels = "0.66.9"
-# fuel-vm = "0.59.2"
-fuel-vm = { git = "https://github.com/FuelLabs/fuel-vm" }
-fuel-core-client = { git = "https://github.com/FuelLabs/fuel-core", branch = "dento/execution-trace"}
-fuel-core-types =  { git = "https://github.com/FuelLabs/fuel-core", branch = "dento/execution-trace"}
+fuels = "0.70"
+fuel-vm = "0.59.2"
+# fuel-vm = { git = "https://github.com/FuelLabs/fuel-vm" }
+fuel-core-client = { git = "https://github.com/FuelLabs/fuel-core" }
+fuel-core-types =  { git = "https://github.com/FuelLabs/fuel-core" }
+fuel-core-storage =  { git = "https://github.com/FuelLabs/fuel-core" }
 fuel-abi-types = "0.8"
 
 # External dependencies
@@ -47,10 +49,9 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1.41"
 
 [patch.crates-io]
-fuels = { git = "https://github.com/FuelLabs/fuels-rs", branch = "dento/streaming-decoder" }
+# fuels = { git = "https://github.com/FuelLabs/fuels-rs" }
 fuel-vm = { git = "https://github.com/FuelLabs/fuel-vm" }
-fuel-core-client = { git = "https://github.com/FuelLabs/fuel-core", branch = "dento/execution-trace"}
-fuel-core-types =  { git = "https://github.com/FuelLabs/fuel-core", branch = "dento/execution-trace"}
 
 [patch.'https://github.com/FuelLabs/fuel-core'] # Override fuel-vm for fuel-core deps as well
 fuel-vm = { git = "https://github.com/FuelLabs/fuel-vm" }
+# fuel-vm = { path = "../fuel-vm/fuel-vm" }

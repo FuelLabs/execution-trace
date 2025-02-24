@@ -1,4 +1,5 @@
 use fuel_core_types::{services::executor::StorageReadReplayEvent, tai64::Tai64};
+use fuel_core_storage::column::Column;
 use fuel_vm::{
     error::{InterpreterError, RuntimeError},
     fuel_storage::{StorageRead, StorageSize, StorageWrite},
@@ -13,7 +14,7 @@ use fuel_vm::{
 use primitive_types::U256;
 use std::{cell::RefCell, collections::HashMap};
 
-type InnerStorage = HashMap<String, HashMap<Vec<u8>, Option<Vec<u8>>>>;
+type InnerStorage = HashMap<Column, HashMap<Vec<u8>, Option<Vec<u8>>>>;
 
 #[derive(Clone)]
 pub struct ShallowStorage {
@@ -29,70 +30,71 @@ impl ShallowStorage {
     pub fn initial_storage(reads: Vec<StorageReadReplayEvent>) -> InnerStorage {
         let mut storage: InnerStorage = HashMap::new();
         for read in reads {
+            let column = Column::try_from(read.column).expect("Invalid column id in read event");
             storage
-                .entry(read.column)
+                .entry(column)
                 .or_default()
                 .insert(read.key, read.value);
         }
         storage
     }
 
-    fn value_of_column(&self, column: &str, key: Vec<u8>) -> Option<Vec<u8>> {
-        self.storage.borrow().get(column)?.get(&key)?.clone()
+    fn value_of_column(&self, column: Column, key: Vec<u8>) -> Option<Vec<u8>> {
+        self.storage.borrow().get(&column)?.get(&key)?.clone()
     }
 
     fn replace_column(
         &self,
-        column: &'static str,
+        column: Column,
         key: Vec<u8>,
         value: Option<Vec<u8>>,
     ) -> Option<Vec<u8>> {
         self.storage
             .borrow_mut()
-            .entry(column.to_owned())
+            .entry(column)
             .or_default()
             .insert(key.clone(), value)?
     }
 }
 
 macro_rules! storage_rw {
-    ($table:ident, $convert_key:expr, $convert_value:expr, $convert_value_back:expr $(,)?) => {
-        storage_rw!($table = $table, $convert_key, $convert_value, $convert_value_back);
+    ($vm_type:ident, $convert_key:expr, $convert_value:expr, $convert_value_back:expr $(,)?) => {
+        storage_rw!($vm_type = $vm_type, $convert_key, $convert_value, $convert_value_back);
     };
-    ($table:ident = $event_name:ident, $convert_key:expr, $convert_value:expr, $convert_value_back:expr $(,)?) => {
-        impl StorageSize<$table> for ShallowStorage {
-            fn size_of_value(&self, key: &<$table as fuel_vm::fuel_storage::Mappable>::Key) -> Result<Option<usize>, Self::Error> {
-                tracing::debug!("{} size_of_value {}", stringify!($event_name), hex::encode(&$convert_key(key)));
-                let head = self.value_of_column(stringify!($event_name), $convert_key(key));
+    ($vm_type:ident = $core_column:ident, $convert_key:expr, $convert_value:expr, $convert_value_back:expr $(,)?) => {
+        impl StorageSize<$vm_type> for ShallowStorage {
+            fn size_of_value(&self, key: &<$vm_type as fuel_vm::fuel_storage::Mappable>::Key) -> Result<Option<usize>, Self::Error> {
+                tracing::debug!("{:?} size_of_value {}", stringify!($core_column), hex::encode(&$convert_key(key)));
+                let head = self.value_of_column(Column::$core_column, $convert_key(key));
                 Ok(head.map(|v| v.len()))
             }
         }
 
-        impl StorageInspect<$table> for ShallowStorage {
+        impl StorageInspect<$vm_type> for ShallowStorage {
             type Error = Error;
 
-            fn get(&self, key: &<$table as fuel_vm::fuel_storage::Mappable>::Key) -> Result<Option<std::borrow::Cow<<$table as fuel_vm::fuel_storage::Mappable>::OwnedValue>>, Self::Error> {
-                tracing::debug!("{} get {}", stringify!($event_name), hex::encode(&$convert_key(key)));
-                let head = self.value_of_column(stringify!($event_name), $convert_key(key));
+            fn get(&self, key: &<$vm_type as fuel_vm::fuel_storage::Mappable>::Key) -> Result<Option<std::borrow::Cow<<$vm_type as fuel_vm::fuel_storage::Mappable>::OwnedValue>>, Self::Error> {
+                tracing::debug!("{} get {}", stringify!($core_column), hex::encode(&$convert_key(key)));
+                let head = self.value_of_column(Column::$core_column, $convert_key(key));
                 Ok(head.map($convert_value).map(std::borrow::Cow::Owned))
             }
 
-            fn contains_key(&self, key: &<$table as fuel_vm::fuel_storage::Mappable>::Key) -> Result<bool, Self::Error> {
-                tracing::debug!("{} contains_key {}", stringify!($event_name), hex::encode(&$convert_key(key)));
-                let head = self.value_of_column(stringify!($event_name), $convert_key(key));
+            fn contains_key(&self, key: &<$vm_type as fuel_vm::fuel_storage::Mappable>::Key) -> Result<bool, Self::Error> {
+                tracing::debug!("{} contains_key {}", stringify!($core_column), hex::encode(&$convert_key(key)));
+                let head = self.value_of_column(Column::$core_column, $convert_key(key));
                 Ok(head.is_some())
             }
         }
 
-        impl StorageRead<$table> for ShallowStorage {
+        impl StorageRead<$vm_type> for ShallowStorage {
             fn read(
                 &self,
-                key: &<$table as fuel_vm::fuel_storage::Mappable>::Key,
+                key: &<$vm_type as fuel_vm::fuel_storage::Mappable>::Key,
                 offset: usize,
                 buf: &mut [u8],
             ) -> Result<Option<usize>, Self::Error> {
-                tracing::debug!("{} read {}", stringify!($event_name), hex::encode(&$convert_key(key)),);
-                let head = self.value_of_column(stringify!($event_name), $convert_key(key));
+                tracing::debug!("{} read {}", stringify!($core_column), hex::encode(&$convert_key(key)),);
+                let head = self.value_of_column(Column::$core_column, $convert_key(key));
                 let Some(value) = head else {
                     return Ok(None);
                 };
@@ -104,44 +106,44 @@ macro_rules! storage_rw {
                 Ok(Some(buf.len()))
             }
 
-            fn read_alloc(&self, key: &<$table as fuel_vm::fuel_storage::Mappable>::Key) -> Result<Option<Vec<u8>>, Self::Error> {
-                todo!("{} read_alloc {}", stringify!($event_name), hex::encode(&$convert_key(key)))
+            fn read_alloc(&self, key: &<$vm_type as fuel_vm::fuel_storage::Mappable>::Key) -> Result<Option<Vec<u8>>, Self::Error> {
+                todo!("{} read_alloc {}", stringify!($core_column), hex::encode(&$convert_key(key)))
             }
         }
 
-        impl StorageMutate<$table> for ShallowStorage {
+        impl StorageMutate<$vm_type> for ShallowStorage {
             fn replace(
                 &mut self,
-                key: &<$table as fuel_vm::fuel_storage::Mappable>::Key,
-                value: &<$table as fuel_vm::fuel_storage::Mappable>::Value,
-            ) -> Result<Option<<$table as fuel_vm::fuel_storage::Mappable>::OwnedValue>, Self::Error> {
-                tracing::debug!("{} replace {} (value={value:?})", stringify!($event_name), hex::encode(&$convert_key(key)));
-                Ok(self.replace_column(stringify!($event_name), $convert_key(key), Some($convert_value_back(value))).map($convert_value))
+                key: &<$vm_type as fuel_vm::fuel_storage::Mappable>::Key,
+                value: &<$vm_type as fuel_vm::fuel_storage::Mappable>::Value,
+            ) -> Result<Option<<$vm_type as fuel_vm::fuel_storage::Mappable>::OwnedValue>, Self::Error> {
+                tracing::debug!("{} replace {} (value={value:?})", stringify!($core_column), hex::encode(&$convert_key(key)));
+                Ok(self.replace_column(Column::$core_column, $convert_key(key), Some($convert_value_back(value))).map($convert_value))
             }
 
-            fn take(&mut self, key: &<$table as fuel_vm::fuel_storage::Mappable>::Key) -> Result<Option<<$table as fuel_vm::fuel_storage::Mappable>::OwnedValue>, Self::Error> {
-                tracing::debug!("{} take {}", stringify!($event_name), hex::encode(&$convert_key(key)));
-                Ok(self.replace_column(stringify!($event_name), $convert_key(key), None).map($convert_value))
+            fn take(&mut self, key: &<$vm_type as fuel_vm::fuel_storage::Mappable>::Key) -> Result<Option<<$vm_type as fuel_vm::fuel_storage::Mappable>::OwnedValue>, Self::Error> {
+                tracing::debug!("{} take {}", stringify!($core_column), hex::encode(&$convert_key(key)));
+                Ok(self.replace_column(Column::$core_column, $convert_key(key), None).map($convert_value))
             }
         }
 
 
-        impl StorageWrite<$table> for ShallowStorage {
-            fn write_bytes(&mut self, key: &<$table as fuel_vm::fuel_storage::Mappable>::Key, _buf: &[u8]) -> Result<usize, Self::Error> {
+        impl StorageWrite<$vm_type> for ShallowStorage {
+            fn write_bytes(&mut self, key: &<$vm_type as fuel_vm::fuel_storage::Mappable>::Key, _buf: &[u8]) -> Result<usize, Self::Error> {
                 todo!("write_bytes {key:?}")
             }
 
             fn replace_bytes(
                 &mut self,
-                key: &<$table as fuel_vm::fuel_storage::Mappable>::Key,
+                key: &<$vm_type as fuel_vm::fuel_storage::Mappable>::Key,
                 buf: &[u8],
             ) -> Result<(usize, Option<Vec<u8>>), Self::Error> {
-                tracing::debug!("{} replace_bytes {key:?}", stringify!($event_name));
-                let head = self.replace_column(stringify!($event_name), $convert_key(key), None);
+                tracing::debug!("{} replace_bytes {key:?}", stringify!($core_column));
+                let head = self.replace_column(Column::$core_column, $convert_key(key), None);
                 Ok((buf.len(), head))
             }
 
-            fn take_bytes(&mut self, key: &<$table as fuel_vm::fuel_storage::Mappable>::Key) -> Result<Option<Vec<u8>>, Self::Error> {
+            fn take_bytes(&mut self, key: &<$vm_type as fuel_vm::fuel_storage::Mappable>::Key) -> Result<Option<Vec<u8>>, Self::Error> {
                 todo!("take_bytes {key:?}")
             }
         }
