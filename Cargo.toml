@@ -28,11 +28,10 @@ fuel-execution-trace-http-server = { version = "0.1.0", path = "./crates/http-se
 
 # Fuel dependencies
 fuels = "0.70"
-fuel-vm = "0.59.2"
-# fuel-vm = { git = "https://github.com/FuelLabs/fuel-vm" }
-fuel-core-client = { git = "https://github.com/FuelLabs/fuel-core" }
-fuel-core-types =  { git = "https://github.com/FuelLabs/fuel-core" }
-fuel-core-storage =  { git = "https://github.com/FuelLabs/fuel-core" }
+fuel-vm = "0.60.0"
+fuel-core-client = "0.42.0"
+fuel-core-types =  "0.42.0"
+fuel-core-storage =  "0.42.0"
 fuel-abi-types = "0.8"
 
 # External dependencies
@@ -47,11 +46,3 @@ serde_json = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1.41"
-
-[patch.crates-io]
-# fuels = { git = "https://github.com/FuelLabs/fuels-rs" }
-fuel-vm = { git = "https://github.com/FuelLabs/fuel-vm" }
-
-[patch.'https://github.com/FuelLabs/fuel-core'] # Override fuel-vm for fuel-core deps as well
-fuel-vm = { git = "https://github.com/FuelLabs/fuel-vm" }
-# fuel-vm = { path = "../fuel-vm/fuel-vm" }

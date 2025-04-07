@@ -107,7 +107,10 @@ where
         let receipts = match tx.status {
             TransactionStatus::Success { receipts, .. } => receipts,
             TransactionStatus::Failure { .. } => continue,
-            TransactionStatus::Submitted { .. } | TransactionStatus::SqueezedOut { .. } => {
+            TransactionStatus::Submitted { .. }
+            | TransactionStatus::SqueezedOut { .. }
+            | TransactionStatus::PreconfirmationSuccess { .. }
+            | TransactionStatus::PreconfirmationFailure { .. } => {
                 return Err(TraceError::MalformedBlock)
             }
         };
