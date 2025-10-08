@@ -28,7 +28,7 @@ fuel-execution-trace-http-server = { version = "0.1.0", path = "./crates/http-se
 
 # Fuel dependencies
 fuels = "0.70"
-fuel-vm = "0.60.0"
+fuel-vm = "0.60.2"
 fuel-core-client = "0.42.0"
 fuel-core-types =  "0.42.0"
 fuel-core-storage =  "0.42.0"
